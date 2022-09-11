@@ -1,0 +1,135 @@
+---
+title: "O*NET Database Analysis"
+author: "Benjamin Poag"
+date: '2022-05-16'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(visreg)
+library(stargazer)
+```
+
+## Import datasets into R
+```{r}
+# Import Excel datasets into R
+onet.int <- read.csv("Interests.csv")
+onet.prep <- read.csv("Job_Zones.csv")
+
+```
+
+## Concatenate datasets and clean merged data
+```{r}
+# Separate Holland Code data
+realistic <- onet.int %>% filter(Element.Name == "Realistic") %>% select(Title, Data.Value)
+investigative <- onet.int %>% filter(Element.Name == "Investigative") %>% select(Data.Value)
+artistic <- onet.int %>% filter(Element.Name == "Artistic") %>% select(Data.Value)
+social <- onet.int %>% filter(Element.Name == "Social") %>% select(Data.Value)
+enterprising <- onet.int %>% filter(Element.Name == "Enterprising") %>% select(Data.Value)
+conventional <- onet.int %>% filter(Element.Name == "Conventional") %>% select(Data.Value)
+
+# Restructure interest dataset
+onet.int.new <- data.frame(Title = realistic$Title, 
+                           Realistic = realistic$Data.Value, 
+                           Investigative = investigative$Data.Value, 
+                           Artistic = artistic$Data.Value, 
+                           Social = social$Data.Value, 
+                           Enterprising = enterprising$Data.Value, 
+                           Conventional = conventional$Data.Value)
+
+# Combine datasets by grouping by occupation title
+onet.data <- merge(onet.int.new, onet.prep, by = "Title")
+
+# Eliminate extraneous columns
+onet.data <- onet.data %>% select(Title, Realistic, Investigative, Artistic, Social, Enterprising, Conventional, Job.Zone)
+
+```
+
+## Conduct descriptive analyses
+```{r}
+# Summarize data
+summary(onet.data)
+
+# Create correlation matrix
+round(cor(onet.data[,2:8]), 2)
+
+# Export stargazer table
+stargazer(round(cor(onet.data[,2:8]), 2), title = "Table 1. Career Interests Correlation Matrix", out = "career_corr.html")
+```
+
+## Visualize sample breakdown
+```{r}
+# Visualize breakdown of job zone in sample
+ggplot(data = onet.data, mapping = aes(x = as.character(Job.Zone), y = Investigative)) +
+  geom_boxplot()
+
+```
+
+## Conduct multiple regression analysis
+```{r}
+# Create multiple regression model for job preparation with interests as predictors
+mult.reg <- lm(Job.Zone ~ Realistic + Investigative + Artistic + Social + Enterprising + Conventional, data = onet.data)
+summary(mult.reg)
+
+# Build stargazer table
+stargazer(mult.reg,
+          title="Table 2. Multiple Regression of Job Preparation on Career Interest",
+          dep.var.caption="DV: Level of Job Preparation Required",
+          dep.var.labels = c("Job Zone"),
+          covariate.labels=c("Realistic", "Investigative", "Artistic", "Social", 
+                             "Enterprising", "Conventional"),
+          notes.label="Significance levels",
+          type="html",
+          out="career_reg.htm")
+```
+
+# Plot multiple regression results
+```{r}
+reg.partial <- visreg(mult.reg, "Investigative", xlab = "Interest: Investigative",
+                      ylab = "Job Preparation Level", main = "Job Preparation Required for Given Interest")
+
+```
+
+## Apply machine learning model
+
+Split data into training and testing sets
+```{r}
+# Determine sample size for training data
+smp_size <- floor(0.75 * nrow(onet.data))
+
+# Create index to randomly tag 75% of cases
+train_index <- sample(seq_len(nrow(onet.data)), size = smp_size)
+
+# Assign tagged cases to testing data
+training <- onet.data[train_index,]
+
+# Assign non-tagged cases to testing data
+testing <- onet.data[-train_index,]
+
+```
+
+Check for random split in data
+```{r}
+# Check means of each set and compare
+mean(onet.data$Job.Zone)
+mean(training$Job.Zone)
+mean(testing$Job.Zone)
+
+```
+
+Build predictive model from regression model
+```{r}
+# Build predictive model
+mult.reg1 <- lm(Job.Zone ~ Realistic + Investigative + Artistic + Social + Enterprising + Conventional, data = training)
+job_pred <- predict(mult.reg1, newdata = testing)
+
+# Compare test data with predicted values
+actual.preds <- data.frame(cbind(actuals = testing $ Job.Zone, predicted = job_pred))
+head(actual.preds)
+
+# Assess correlation accuracy
+correlation_accuracy <- cor(actual.preds)
+correlation_accuracy
+```
